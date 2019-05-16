@@ -1,0 +1,6 @@
+resources.tf.org
+terraform.tfplan
+terraform.tfplans
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/*
