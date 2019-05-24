@@ -2,196 +2,194 @@
 # VARIABLES
 ##################################################################################
 
-variable "aws_access_key" {}
-variable "aws_secret_key" {}
+variable "tenancy_ocid" {}
+variable "user_ocid" {}
+variable "fingerprint" {}
+variable "compartment_id" {}
+variable "region" {
+    default = "eu-frankfurt-1"
+}
+variable "websitetext" {
+    default = "Hello, World!"
+}
 variable "private_key_path" {
-    default = "/home/frederique/Downloads/demo.pem"
+    default = "D:\\SIG\\opi_api_key.pem"
 }
-variable "key_name" {
-    default = "demo"
+variable "public_key_path_instance" {
+    default = "D:\\SIG\\id_rsa.pub"
 }
-variable "instance_count" {
-    default = "2"
+variable "user_data_control_file" {
+    default = "D:\\SIG\\terraform\\user_data_control.sh"
+}
+variable "user_data_node_file" {
+    default = "D:\\SIG\\terraform\\user_data_node.sh"
 }
 
 ##################################################################################
 # PROVIDERS
 ##################################################################################
 
-provider "aws" {
-  access_key = "${var.aws_access_key}"
-  secret_key = "${var.aws_secret_key}"
-  region     = "eu-west-1"
+provider "oci" {
+  tenancy_ocid     = "${var.tenancy_ocid}"
+  user_ocid        = "${var.user_ocid}"
+  fingerprint      = "${var.fingerprint}"
+  region           = "${var.region}"
+  private_key_path = "${var.private_key_path}"
 }
 
 ##################################################################################
 # DATA
 ##################################################################################
 
-data "aws_availability_zones" "available" {}
+data "oci_identity_availability_domains" "availability" {
+  compartment_id = "${var.compartment_id}"
+}
 
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners = [679593333241]
+data "oci_core_images" "oracle_linux_images" {
+  compartment_id = "${var.tenancy_ocid}"
+  operating_system = "Oracle Linux"
+  shape = "VM.Standard2.1"
+}
 
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-xenial-16.04-amd64-server*"]
-  }
-
-  filter {
-    name   = "architecture"
-    values = ["x86_64"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-
-  filter {
-    name   = "root-device-type"
-    values = ["ebs"]
+data "template_file" "user_data_control_file" {
+  template = "${file("${var.user_data_control_file}")}"
+  vars {
+    first_ip_address = "${element(oci_core_instance.sig_node.*.private_ip,0)}"
+    second_ip_address = "${element(oci_core_instance.sig_node.*.private_ip,1)}"
   }
 }
 
+data "template_file" "user_data_node_file" {
+  template = "${file("${var.user_data_node_file}")}"
+  vars {
+    websitetext = "${var.websitetext}"  
+  }
+}
 
 ##################################################################################
 # RESOURCES
+#
+# Een aantal uitgangspunten:
+# - Oplossing moet werken binnen een gratis Oracle Cloud account, dus max 1 VM
+#   per AZ. Daarom dus ook 3 subnets.
 ##################################################################################
 
-# NETWORKING #
-module "vpc" {
-  source = "terraform-aws-modules/vpc/aws"
-  name   = "demo_beheer"
+resource "oci_core_virtual_network" "vcn_sig" {
+  compartment_id = "${var.compartment_id}"
+  display_name = "vcn_sig"
+  cidr_block = "10.0.0.0/16"
+  dns_label = "vcnsig"
+}
 
-  cidr            = "10.0.0.0/16"
-  azs             = "${data.aws_availability_zones.available.names}"
-  public_subnets = ["10.0.0.0/24"]
-  private_subnets = ["10.0.1.0/24"]
-  assign_generated_ipv6_cidr_block="false" 
-  enable_nat_gateway = "false" 
-  single_nat_gateway = "false"
-  enable_dns_hostnames = "true" 
-  enable_dns_support = "true"
-  public_subnet_tags = {
-    Name = "demo-beheer-public"
-  }
-  vpc_tags = {
-    Name = "demo-beheer-vpc"
+resource "oci_core_internet_gateway" "vcn_sig_igw" {
+  compartment_id = "${var.compartment_id}"
+  vcn_id = "${oci_core_virtual_network.vcn_sig.id}"
+  display_name = "vcn_sig_igw"
+  enabled = "true"
+}
+
+resource "oci_core_route_table" "vcn_sig_rt" {
+  compartment_id = "${var.compartment_id}"
+  vcn_id = "${oci_core_virtual_network.vcn_sig.id}"
+  display_name = "vcn_sig_rt"
+  route_rules {
+    destination = "0.0.0.0/0"
+    network_entity_id = "${oci_core_internet_gateway.vcn_sig_igw.id}"
   }
 }
 
-# SECURITY GROUPS #
-resource "aws_security_group" "demo_sg" {
-  name        = "demo_sg"
-  vpc_id      = "${module.vpc.vpc_id}"
+resource "oci_core_security_list" "vcn_sig_sl" {
+  compartment_id = "${var.compartment_id}"
+  vcn_id = "${oci_core_virtual_network.vcn_sig.id}"
+  display_name = "vcn_sig_sl"
+  egress_security_rules = [
+    { destination = "0.0.0.0/0" protocol = "all"}
+  ]
+  ingress_security_rules = [
+    { protocol = "6", source = "0.0.0.0/0", tcp_options { "max" = 22, "min" = 22 }},
+    { protocol = "6", source = "0.0.0.0/0", tcp_options { "max" = 80, "min" = 80 }},
+    { protocol = "1", source = "10.0.0.0/16"}
+  ]
+}
 
-  #Allow HTTP from anywhere
-  ingress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+resource "oci_core_subnet" "sig_subnet" {
+  count=3
+
+  compartment_id = "${var.compartment_id}"
+  vcn_id = "${oci_core_virtual_network.vcn_sig.id}"
+  display_name = "sig_subnet"
+  availability_domain = "${lookup(data.oci_identity_availability_domains.availability.availability_domains[count.index], "name")}"
+  cidr_block = "10.0.${count.index+1}.0/24"
+  route_table_id = "${oci_core_route_table.vcn_sig_rt.id}"
+  security_list_ids = ["${oci_core_security_list.vcn_sig_sl.id}"]
+  dhcp_options_id = "${oci_core_virtual_network.vcn_sig.default_dhcp_options_id}"
+  dns_label = "sigsubnet${count.index+1}"
+}
+
+resource "oci_core_instance" "sig_control" {
+  compartment_id = "${var.compartment_id}"
+  display_name = "control_node"
+  availability_domain = "${lookup(data.oci_identity_availability_domains.availability.availability_domains[0], "name")}"
+
+  source_details {
+    source_id = "${lookup(data.oci_core_images.oracle_linux_images.images[0], "id")}"
+    source_type = "image"
   }
-
-  #allow all outbound
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  shape = "VM.Standard2.1"
+  create_vnic_details {
+    subnet_id = "${element(oci_core_subnet.sig_subnet.*.id, 0)}"
+    display_name = "primary-vnic"
+    assign_public_ip = true
+    private_ip = "10.0.1.2"
+    hostname_label = "sigcontrolnode"
   }
-
-  tags {
-    Name = "demo_sg"
+  metadata {
+    ssh_authorized_keys = "${file(var.public_key_path_instance)}"
+    user_data = "${base64encode(data.template_file.user_data_control_file.rendered)}"
+  }
+  timeouts {
+    create = "5m"
   }
 }
 
-# INSTANCES #
-resource "aws_instance" "demo_control" {
-  ami           = "${data.aws_ami.ubuntu.id}"
-  instance_type = "t2.micro"
-  subnet_id     = "${element(module.vpc.public_subnets,0)}" 
-  vpc_security_group_ids = ["${aws_security_group.demo_sg.id}"]
-  key_name        = "${var.key_name}"
+resource "oci_core_instance" "sig_node" {
+  count="2"
+  
+  compartment_id = "${var.compartment_id}"
+  display_name = "sig_node"
+  availability_domain = "${lookup(data.oci_identity_availability_domains.availability.availability_domains["${count.index+1}"], "name")}"
 
-  user_data = <<EOF
-#!/bin/bash
-
-# Python is nodig voor ansible, unzip voor terraform:
-apt-get -y install python unzip
-
-# Haal terraform op en unzip het
-cd /home/ubuntu
-curl https://releases.hashicorp.com/terraform/0.11.13/terraform_0.11.13_linux_amd64.zip --output /home/ubuntu/terraform.zip
-unzip /home/ubuntu/terraform.zip
-
-# Installeer de nieuwste versie van ansible (zie handleiding Ansible)
-apt-get update
-apt-get -y install software-properties-common
-apt-add-repository --yes --update ppa:ansible/ansible
-apt-get -y install ansible
-
-# Maak een ansible user aan (voor wie dat prettig vindt ;-) ) 
-adduser ansible
-
-# Voeg de twee andere nodes toe aan de Ansible host tabel:
-echo [web] >> /etc/ansible/hosts
-echo ${element(aws_instance.demo_node.*.private_ip,0)} >> /etc/ansible/hosts
-echo ${element(aws_instance.demo_node.*.private_ip,1)} >> /etc/ansible/hosts
-
-# De default voor password authenticatie met ssh is uit. We hebben het echter nodig voor onderstaande ssh-copy-id
-# opdracht:
-cat /etc/ssh/sshd_config | sed 's/PasswordAuthentication\ no/PasswordAuthentication\ yes/' > /tmp/ssh_config
-cp /tmp/ssh_config /etc/ssh/sshd_config
-systemctl restart sshd
-
-# Niet vergeten:
-# ssh-keygen 					<-- alle defaults aanhouden
-# ssh-copy-id node1				<-- je vindt de IP-adressen in /etc/ansible/hosts
-# ssh-copy-id node2
-EOF
-
-  tags {
-    Name = "demo-control-${count.index + 1}"
+  source_details {
+    source_id = "${lookup(data.oci_core_images.oracle_linux_images.images[0], "id")}"
+    source_type = "image"
   }
-}
-
-resource "aws_instance" "demo_node" {
-  count         = "${var.instance_count}"
-  ami           = "${data.aws_ami.ubuntu.id}"
-  instance_type = "t2.micro"
-  subnet_id     = "${element(module.vpc.public_subnets,0)}" 
-  vpc_security_group_ids = ["${aws_security_group.demo_sg.id}"]
-  key_name        = "${var.key_name}"
-
-  user_data = <<EOF
-#!/bin/bash
-
-# Ansible heeft zowel op de config-machine als op de remote machine Python nodig:
-apt-get -y install python unzip
-
-# Voeg user ansible toe tbv de ansible opdrachten
-adduser ansible
-
-# De default voor password authenticatie met ssh is uit. We hebben het echter nodig voor onderstaande ssh-copy-id
-# opdracht:
-cat /etc/ssh/sshd_config | sed 's/PasswordAuthentication\ no/PasswordAuthentication\ yes/' > /tmp/ssh_config
-cp /tmp/ssh_config /etc/ssh/sshd_config
-systemctl restart sshd
-
-EOF
-
-  tags {
-    Name = "demo-node-${count.index + 1}"
+  shape = "VM.Standard2.1"
+  create_vnic_details {
+    subnet_id = "${element(oci_core_subnet.sig_subnet.*.id, count.index+1)}"
+    display_name = "primary-vnic"
+    assign_public_ip = true
+    private_ip = "10.0.${count.index+2}.${count.index+3}"
+    hostname_label = "signode"
+  }
+  metadata {
+    ssh_authorized_keys = "${file(var.public_key_path_instance)}"
+    user_data = "${base64encode(data.template_file.user_data_node_file.rendered)}"
+  }
+  timeouts {
+    create = "5m"
   }
 }
 
 ##################################################################################
 # OUTPUT
 ##################################################################################
-output "IP adres beheer node" {
-  value = "${aws_instance.demo_control.public_ip}"
+output "IP-adres control instance" {
+  value = "${oci_core_instance.sig_control.public_ip}"
+}
+output "IP-adres node 1" {
+  value = "${element(oci_core_instance.sig_node.*.public_ip,0)}"
+}
+output "IP-adres node 2" {
+  value = "${element(oci_core_instance.sig_node.*.public_ip,1)}"
 }
 
