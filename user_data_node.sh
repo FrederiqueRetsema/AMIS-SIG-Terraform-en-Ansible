@@ -16,9 +16,10 @@ firewall-cmd --permanent --zone=public --add-port=80/tcp
 firewall-cmd --reload
 setenforce 1
 
-# Voeg user ansible toe tbv de ansible opdrachten
+# Voeg user ansible toe tbv de ansible opdrachten. Zorg ervoor dat sudo bij ansible niet om een password vraagt
 adduser ansible -G wheel
-
+echo '%ansible\tALL=(ALL)\tALL/%wheel\tALL=(ALL)\tNOPASSWD: ALL/' >> /etc/sudoers
+ 
 # De default voor password authenticatie met ssh is uit. We hebben het echter nodig voor onderstaande ssh-copy-id
 # opdracht:
 cat /etc/ssh/sshd_config | sed 's/PasswordAuthentication\ no/PasswordAuthentication\ yes/' > /tmp/ssh_config
