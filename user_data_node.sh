@@ -18,7 +18,7 @@ setenforce 1
 
 # Voeg user ansible toe tbv de ansible opdrachten. Zorg ervoor dat sudo bij ansible niet om een password vraagt
 adduser ansible -G wheel
-echo -e "%ansible\tALL=(ALL)\tALL\tNOPASSWD:ALL" >> ./sudoers
+echo -e "%ansible\tALL=(ALL)\tNOPASSWD: ALL" >> /etc/sudoers
  
 # De default voor password authenticatie met ssh is uit. We hebben het echter nodig voor onderstaande ssh-copy-id
 # opdracht:
