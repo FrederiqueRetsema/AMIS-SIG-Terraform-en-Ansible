@@ -17,7 +17,7 @@ firewall-cmd --reload
 setenforce 1
 
 # Voeg user ansible toe tbv de ansible opdrachten
-adduser ansible
+adduser ansible -G wheel
 
 # De default voor password authenticatie met ssh is uit. We hebben het echter nodig voor onderstaande ssh-copy-id
 # opdracht:
