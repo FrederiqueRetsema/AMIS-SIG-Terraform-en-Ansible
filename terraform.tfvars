@@ -1,2 +1,6 @@
-aws_access_key = "ABCDEFGHIJKLMNOPQRST"
-aws_secret_key = "ABCdefGHIjklMNOpqrSTUvwzYZ12345678901234"
+tenancy_ocid = ""
+user_ocid = ""
+fingerprint = ""
+compartment_id = ""
+private_key_path = "D:\\SIG\\oci_api_key.pem"
+region = "eu-frankfurt-1"
