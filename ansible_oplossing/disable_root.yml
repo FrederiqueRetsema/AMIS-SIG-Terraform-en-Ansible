@@ -1,0 +1,20 @@
+---
+- hosts: 10.0.2.3
+  become: yes
+  tasks:
+    - name: Maak groep sudoers aan
+      group:
+         name: sudoers
+         state: present
+    - name: Voeg regel toe aan de sudoers file, alle commando's toegestaan
+      lineinfile:
+         path: /home/ansible/test
+         state: present
+         create: yes
+         line: "%sudoers\tALL=(ALL)\tALL"
+    - name: Disable de root user
+      user:
+         name: root
+         state: present
+         password_lock: yes
+

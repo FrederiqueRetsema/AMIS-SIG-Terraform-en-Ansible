@@ -1,0 +1,8 @@
+---
+- hosts: 10.0.2.3
+  tasks:
+    - name: touch bestand in homedir
+      file: 
+        name: ~/bestand_in_homedir
+        state: touch
+

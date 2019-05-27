@@ -1,0 +1,12 @@
+---
+- hosts: 10.0.2.3
+  tasks:
+    - name: Copieer script naar andere node
+      copy:
+        src: /home/ansible/script.sh
+        dest: /home/ansible/script.sh
+        owner: ansible
+        group: ansible
+        mode: 0744
+    - name: Voer script remote uit
+      shell: /home/ansible/script.sh > /home/ansible/output.txt

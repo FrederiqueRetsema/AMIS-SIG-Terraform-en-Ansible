@@ -1,0 +1,9 @@
+---
+- hosts: 10.0.2.3
+  tasks:
+    - name: Bijwerken .bash_profile met aliases
+      lineinfile:
+         path: /home/ansible/.bash_profile
+         state: present
+         line: "alias ch='cat /etc/hosts'"
+
